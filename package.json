@@ -57,5 +57,13 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alexsandr-pr/serpdino-positions.git"
+  },
+  "homepage": "https://github.com/Alexsandr-pr/serpdino-positions#readme",
+  "bugs": {
+    "url": "https://github.com/Alexsandr-pr/serpdino-positions/issues"
   }
 }
