@@ -3,6 +3,7 @@ import type {
   SerpdinoKeywordUpdatesEntry,
   SerpdinoPage,
   SerpdinoProject,
+  SerpdinoSerpSnapshot,
   SerpdinoVolumeEntry,
 } from './types.js';
 
@@ -55,6 +56,8 @@ export interface SerpdinoClient {
   getKeywordVolumes(projectId: string): Promise<Record<string, SerpdinoVolumeEntry>>;
   /** Ranking pages with average position, worst first. */
   getPages(projectId: string): Promise<SerpdinoPage[]>;
+  /** The Google results page saved by one keyword check (top 30 plus the site), with AI Overview. */
+  getSerpSnapshot(keywordUpdateId: string): Promise<SerpdinoSerpSnapshot>;
   /** Raw GET for endpoints not wrapped here, e.g. `get('/api/user/capacity')`. */
   get<T = unknown>(path: string, query?: Query): Promise<T>;
 }
@@ -127,6 +130,10 @@ export function createSerpdinoClient(options: SerpdinoClientOptions = {}): Serpd
     async getKeywordVolumes(projectId) {
       const body = await get<{ data?: Record<string, SerpdinoVolumeEntry> }>('/api/projects/keyword-volumes', { projectId });
       return body.data ?? {};
+    },
+    async getSerpSnapshot(keywordUpdateId) {
+      const body = await get<{ data: SerpdinoSerpSnapshot }>('/api/projects/position-history', { keywordUpdateId });
+      return body.data;
     },
     async getPages(projectId) {
       const body = await get<{ data?: SerpdinoPage[] }>('/api/projects/pages', { projectId });

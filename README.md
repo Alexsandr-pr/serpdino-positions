@@ -2,7 +2,9 @@
 
 Show your [SerpDino](https://serpdino.com) Google rankings inside your own site's admin.
 
-- A ready Next.js admin page: keywords, SERP (language-country), search volume, estimated clicks, current position, change, best position, ranking URL and a column for every checked day.
+- A ready Next.js admin page: keywords, SERP (language-country), search volume and its 12-month trend, position history, estimated clicks, CPC, competition, current position, change, best position, ranking URL and a column for every checked day, coloured by position band.
+- Interactive: search (`-word` excludes), filter tiles (top 3, top 10, 11–50, not ranking, up, down, AI Overview, cited in AI), sorting by any column including days, period select (7–365 days), SERP select, column toggles, CSV export.
+- Click any position to see the Google results page that check saved: top 30 with movement, the AI Overview, your site highlighted, domains that dropped out; step through checks with ← →.
 - Opens the project of the current site automatically (matched by domain) and has a site switcher for every project in the account.
 - Server-side SerpDino API client with caching, usable outside Next.js.
 - Optional Basic Auth guard for the admin route.
@@ -38,7 +40,15 @@ export default function Page({ searchParams }) {
 }
 ```
 
-3. Close the admin route. With your own auth, put the page behind it. Otherwise use the built-in Basic Auth in `proxy.js` (Next.js 16) or `middleware.js` (Next.js 15 and earlier):
+3. Add the route handler behind the results page popup, e.g. `app/api/serpdino/serp/route.js`. It keeps the API key on the server:
+
+```js
+export { GET } from '@alex-pierierodov/serpdino-positions/next/route';
+```
+
+With another path (or `trailingSlash: true`), pass it to the page: `<SerpdinoPositionsPage serpEndpoint="/api/serpdino/serp/" … />`.
+
+4. Close the admin route. With your own auth, put the page behind it. Otherwise use the built-in Basic Auth in `proxy.js` (Next.js 16) or `middleware.js` (Next.js 15 and earlier):
 
 ```js
 import { checkBasicAuth } from '@alex-pierierodov/serpdino-positions';
@@ -71,7 +81,8 @@ Only rank tracking projects are listed (not Google Maps grid or page monitor pro
 | `domain` | `SERPDINO_SITE_DOMAIN`, then request host | Site domain used to pick its project. |
 | `projectId` | — | Always open this project first. |
 | `hideSwitcher` | `false` | Hide the site switcher. |
-| `days` | `30` | Days of history; one column per checked day. |
+| `days` | `30` | Default days of history; the period select (`?days=`) overrides it. |
+| `serpEndpoint` | `"/api/serpdino/serp"` | Route handler of the results page popup. |
 | `revalidate` | `3600` | Seconds to cache API responses. `0` disables caching. |
 | `ctrCurve` | built-in | CTR per position for the clicks estimate (index 0 = position 1). |
 | `title` | `"Google positions"` | Page heading. |
@@ -107,7 +118,7 @@ const rows = await getKeywordPositions(serpdino, projects[0]._id, { startDate: '
 // rows[i]: { keyword, serp, volume, estimatedClicks, position, change, bestPosition, url, positionsByDay, … }
 ```
 
-Client methods: `listProjects`, `getProject`, `getKeywordUpdates`, `getKeywordVolumes`, `getPages`, and `get(path, query)` for any other read endpoint. API errors throw `SerpdinoError` with `status`, `planRequired` and `retryAfter`.
+Client methods: `listProjects`, `getProject`, `getKeywordUpdates`, `getKeywordVolumes`, `getSerpSnapshot` (results page of one check), `getPages`, and `get(path, query)` for any other read endpoint. API errors throw `SerpdinoError` with `status`, `planRequired` and `retryAfter`.
 
 The client refuses to run in the browser: never ship the API key to the client.
 

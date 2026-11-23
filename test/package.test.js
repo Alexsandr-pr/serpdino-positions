@@ -9,6 +9,7 @@ import {
   findProjectByDomain,
   normalizeDomain,
   pickProject,
+  positionTier,
   SerpdinoError,
   summarize,
   toKeywordPositions,
@@ -19,7 +20,8 @@ const KEYWORD_UPDATES = {
   kw1: {
     keyword: { _id: 'kw1', value: 'seo tools', geoCode: 'US', langCode: 'en', avgMonthlySearches: 8100 },
     updates: [
-      { _id: 'u2', date: '2025-01-16T12:00:00.000Z', status: 'success', position: { position: 9, url: 'https://example.com/seo-tools' } },
+      { _id: 'u5', date: '2025-01-17T12:00:00.000Z', status: 'processing' },
+      { _id: 'u2', date: '2025-01-16T12:00:00.000Z', status: 'success', position: { position: 9, url: 'https://example.com/seo-tools' }, aiSerpId: 'ai1', ourDomainInAiOverview: true, cannibalizationCount: 2 },
       { _id: 'u1', date: '2025-01-15T12:00:00.000Z', status: 'success', position: { position: 12, url: 'https://example.com/seo-tools' } },
     ],
   },
@@ -143,4 +145,55 @@ test('basic auth: refuses without password, accepts the right one', () => {
   assert.equal(checkBasicAuth(request(basic('admin', 'wrong')), { password: 'secret' })?.status, 401);
   assert.equal(checkBasicAuth(request(basic('admin', 'secret')), { password: 'secret' }), null);
   assert.equal(checkBasicAuth(request(basic('admin', 'secret')), { password: '' })?.status, 401);
+});
+
+test('positionTier: colour band of each position', () => {
+  const cases = [[1, 'top1'], [2, 'top3'], [3, 'top3'], [4, 'top5'], [5, 'top5'], [6, 'top10'], [10, 'top10'],
+    [11, 'top20'], [20, 'top20'], [21, 'top50'], [50, 'top50'], [51, 'rest'], [100, 'rest'], [null, 'none']];
+  for (const [position, tier] of cases) assert.equal(positionTier(position), tier, `position ${position}`);
+});
+
+test('rows: processing checks skipped, checks by day, AI Overview, volume trend and CPC', () => {
+  const rows = toKeywordPositions(KEYWORD_UPDATES, {
+    volumes: { kw1: { tr: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], ci: 40, cl: 0.5, ch: 2.25 } },
+  });
+  const seo = rows.find((row) => row.keyword === 'seo tools');
+  assert.equal(seo.position, 9); // the processing check of Jan 17 does not count
+  assert.equal(seo.latestUpdateId, 'u2');
+  assert.deepEqual(Object.keys(seo.checksByDay).sort(), ['2025-01-15', '2025-01-16']);
+  assert.deepEqual(seo.checksByDay['2025-01-16'], {
+    updateId: 'u2', date: '2025-01-16T12:00:00.000Z', position: 9, url: 'https://example.com/seo-tools',
+    aiOverview: true, ourDomainInAiOverview: true,
+  });
+  assert.equal(seo.aiOverview, true);
+  assert.equal(seo.ourDomainInAiOverview, true);
+  assert.equal(seo.cannibalization, 2);
+  assert.deepEqual(seo.volumeTrend, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.equal(seo.competition, 40);
+  assert.equal(seo.cpcHigh, 2.25);
+
+  const tracker = rows.find((row) => row.keyword === 'rank tracker');
+  assert.equal(tracker.checksByDay['2025-01-16'].position, null);
+  assert.equal(tracker.aiOverview, false);
+});
+
+test('client loads the results page of a check', async () => {
+  let called;
+  const client = createSerpdinoClient({
+    apiKey: 'sd_test',
+    fetch: async (url) => {
+      called = new URL(url);
+      return Response.json({ success: true, data: { keywordId: 'kw1', keywordValue: 'seo tools', date: '2025-01-16', resultList: [{ position: 1, domain: 'a.com' }] } });
+    },
+  });
+  const snapshot = await client.getSerpSnapshot('u2');
+  assert.equal(called.pathname, '/api/projects/position-history');
+  assert.equal(called.searchParams.get('keywordUpdateId'), 'u2');
+  assert.equal(snapshot.resultList[0].domain, 'a.com');
+});
+
+test('results page route refuses a missing or malformed id', async () => {
+  const { GET } = await import('../dist/next/route.js');
+  assert.equal((await GET(new Request('https://site.com/api/serpdino/serp'))).status, 400);
+  assert.equal((await GET(new Request('https://site.com/api/serpdino/serp?keywordUpdateId=../projects'))).status, 400);
 });

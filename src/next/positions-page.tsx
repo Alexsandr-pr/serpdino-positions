@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
 
 import { createSerpdinoClient, SerpdinoError } from '../client.js';
-import { pickProject } from '../project-match.js';
-import { collectDays, getKeywordPositions, summarize } from '../positions.js';
-import type { KeywordPosition, SerpdinoProject } from '../types.js';
+import { normalizeDomain, pickProject } from '../project-match.js';
+import { getKeywordPositions } from '../positions.js';
+import type { SerpdinoProject } from '../types.js';
 
+import { PositionsExplorer } from './positions-explorer.js';
 import { ProjectSelect } from './project-select.js';
+
+/** Choices of the period select, in days. */
+export const PERIOD_OPTIONS = [7, 14, 30, 90, 180, 365];
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -23,8 +27,13 @@ export interface SerpdinoPositionsPageProps {
   projectId?: string;
   /** Hide the site switcher and always show the matched project. */
   hideSwitcher?: boolean;
-  /** Days of history, one column per checked day. Default: 30. */
+  /** Default days of history, one column per checked day; the period select (`?days=`) overrides it. Default: 30. */
   days?: number;
+  /**
+   * Route handler that returns the results page of one check (export `GET` from
+   * `@alex-pierierodov/serpdino-positions/next/route`). Default: "/api/serpdino/serp".
+   */
+  serpEndpoint?: string;
   /** Seconds to cache API responses. Default: 3600. */
   revalidate?: number;
   /** Your own CTR curve for "Est. clicks/mo" (index 0 = position 1). */
@@ -58,9 +67,13 @@ export async function SerpdinoPositionsPage({
   ctrCurve,
   title = 'Google positions',
   param = 'project',
+  serpEndpoint = '/api/serpdino/serp',
 }: SerpdinoPositionsPageProps) {
   const params = (await searchParams) ?? {};
   const requested = firstValue(params[param]);
+  const requestedDays = Number(firstValue(params.days));
+  const period = PERIOD_OPTIONS.includes(requestedDays) ? requestedDays : days;
+  const periodOptions = PERIOD_OPTIONS.includes(period) ? PERIOD_OPTIONS : [...PERIOD_OPTIONS, period].sort((a, b) => a - b);
   const siteDomain = domain ?? env('SERPDINO_SITE_DOMAIN') ?? (await requestHost());
 
   try {
@@ -76,16 +89,32 @@ export async function SerpdinoPositionsPage({
       );
     }
 
-    const rows = await getKeywordPositions(client, project._id, { startDate: daysAgo(days), ctrCurve });
+    const rows = await getKeywordPositions(client, project._id, { startDate: daysAgo(period), ctrCurve });
     const switcher =
       !hideSwitcher && projects.length > 1 ? (
-        <ProjectSelect param={param} value={project._id} projects={projects.map(toOption)} />
+        <ProjectSelect
+          param={param}
+          value={project._id}
+          projects={projects.map(toOption)}
+          keep={period !== days ? { days: String(period) } : undefined}
+        />
       ) : null;
+    const ourDomains = [project.domain, ...(project.aliases ?? [])].map(normalizeDomain).filter(Boolean);
 
     return (
       <Shell title={title} subtitle={project.domain} actions={switcher}>
-        <Summary rows={rows} />
-        {rows.length ? <PositionsTable rows={rows} /> : <Notice>No keywords are tracked in this project yet.</Notice>}
+        {rows.length ? (
+          <PositionsExplorer
+            rows={rows}
+            ourDomains={ourDomains}
+            serpEndpoint={serpEndpoint}
+            period={period}
+            periodOptions={periodOptions}
+            periodParam="days"
+          />
+        ) : (
+          <Notice>No keywords are tracked in this project in the last {period} days.</Notice>
+        )}
       </Shell>
     );
   } catch (error) {
@@ -128,104 +157,6 @@ function Notice({ tone = 'info', children }: { tone?: 'info' | 'error'; children
   return <p className={`sdp-notice sdp-notice-${tone}`}>{children}</p>;
 }
 
-function Summary({ rows }: { rows: KeywordPosition[] }) {
-  const stats = summarize(rows);
-  const items: [string, string | number][] = [
-    ['Keywords', stats.keywords],
-    ['Top 3', stats.top3],
-    ['Top 10', stats.top10],
-    ['Avg. position', stats.averagePosition ?? '—'],
-    ['Est. clicks/mo', formatNumber(stats.estimatedClicks)],
-    ['Up / down', `${stats.up} / ${stats.down}`],
-  ];
-  return (
-    <dl className="sdp-summary">
-      {items.map(([label, value]) => (
-        <div key={label} className="sdp-stat">
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function PositionsTable({ rows }: { rows: KeywordPosition[] }) {
-  const days = collectDays(rows);
-  return (
-    <div className="sdp-table-wrap">
-      <table className="sdp-table">
-        <thead>
-          <tr>
-            <th className="sdp-sticky">Keyword</th>
-            <th>SERP</th>
-            <th className="sdp-num">Volume</th>
-            <th className="sdp-num" title="Estimated monthly clicks based on position and search volume">
-              Est. clicks/mo
-            </th>
-            <th className="sdp-num">Position</th>
-            <th className="sdp-num">Change</th>
-            <th className="sdp-num">Best</th>
-            <th>URL</th>
-            {days.map((day) => (
-              <th key={day} className="sdp-num sdp-day">
-                {formatDay(day)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td className="sdp-sticky sdp-keyword">{row.keyword}</td>
-              <td className="sdp-muted sdp-nowrap">{row.serp || '—'}</td>
-              <td className="sdp-num">{formatNumber(row.volume)}</td>
-              <td className="sdp-num">{formatNumber(row.estimatedClicks)}</td>
-              <td className="sdp-num">
-                <Position value={row.position} />
-              </td>
-              <td className="sdp-num">
-                <Change value={row.change} />
-              </td>
-              <td className="sdp-num">{row.bestPosition ?? '—'}</td>
-              <td className="sdp-url">
-                {row.url ? (
-                  <a href={row.url} target="_blank" rel="noopener noreferrer" title={row.url}>
-                    {shortUrl(row.url)}
-                  </a>
-                ) : (
-                  '—'
-                )}
-              </td>
-              {days.map((day) => (
-                <td key={day} className="sdp-num sdp-day">
-                  {day in row.positionsByDay ? <Position value={row.positionsByDay[day]} /> : <span className="sdp-muted">·</span>}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/** Position with a tint: top 3, top 10, not ranking. */
-function Position({ value }: { value: number | null }) {
-  if (value === null) return <span className="sdp-pos sdp-pos-none" title="Not in the checked results">—</span>;
-  const tier = value <= 3 ? 'sdp-pos-top3' : value <= 10 ? 'sdp-pos-top10' : 'sdp-pos-rest';
-  return <span className={`sdp-pos ${tier}`}>{value}</span>;
-}
-
-function Change({ value }: { value: number | null }) {
-  if (value === null || value === 0) return <span className="sdp-change">—</span>;
-  return (
-    <span className={`sdp-change ${value > 0 ? 'sdp-up' : 'sdp-down'}`}>
-      {value > 0 ? '▲' : '▼'} {Math.abs(value)}
-    </span>
-  );
-}
-
 // ----------------------------------------------------------------------
 
 function toOption(project: SerpdinoProject) {
@@ -240,14 +171,6 @@ function describeError(error: unknown): string {
     return error.message;
   }
   return 'Could not load positions from SerpDino.';
-}
-
-function formatNumber(value: number | null): string {
-  return value === null ? '—' : value.toLocaleString('en-US');
-}
-
-function formatDay(day: string): string {
-  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 /** Host of the current request (Next.js only), used to match the site's project when no domain is given. */
@@ -269,23 +192,6 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 function daysAgo(days: number): string {
   const date = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   return date.toISOString().slice(0, 10);
-}
-
-function shortUrl(url: string): string {
-  try {
-    const { pathname, search } = new URL(url);
-    return safeDecode(pathname + search) || '/';
-  } catch {
-    return url;
-  }
-}
-
-function safeDecode(value: string): string {
-  try {
-    return decodeURI(value);
-  } catch {
-    return value;
-  }
 }
 
 function env(name: string): string | undefined {

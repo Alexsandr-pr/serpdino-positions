@@ -22,6 +22,8 @@ export interface SerpdinoKeyword {
   geoCode: string;
   langCode: string;
   avgMonthlySearches?: number | null;
+  /** Monthly search volume by year. */
+  volume?: { year: number; months: { month: number; value: number }[] }[];
 }
 
 export interface SerpdinoRankingResult {
@@ -37,6 +39,11 @@ export interface SerpdinoKeywordUpdate {
   status: string;
   /** Missing or null when the domain does not rank in the scraped depth (top 50 or 100). */
   position?: SerpdinoRankingResult | null;
+  /** Set when the results page had an AI Overview. */
+  aiSerpId?: string | null;
+  ourDomainInAiOverview?: boolean;
+  /** How many of the site's URLs rank for the keyword at once. */
+  cannibalizationCount?: number;
 }
 
 export interface SerpdinoKeywordUpdatesEntry {
@@ -66,6 +73,50 @@ export interface SerpdinoPage {
   keywords: { keywordId: string; value: string; position: number }[];
 }
 
+export type SerpdinoMovement = { type: 'up' | 'down' | 'same' | 'new' | 'gone'; value: number | null };
+
+/** One result of a Google results page as SerpDino saved it. */
+export interface SerpdinoSerpResult {
+  position: number;
+  title?: string;
+  domain?: string;
+  url?: string;
+  previousPosition?: number | null;
+  movement?: SerpdinoMovement;
+}
+
+export interface SerpdinoAiOverviewResult {
+  position: number;
+  title?: string;
+  domain?: string;
+  url?: string;
+  isOurDomain?: boolean;
+}
+
+/** GET /api/projects/position-history: the results page of one keyword check (top 30 + the site). */
+export interface SerpdinoSerpSnapshot {
+  keywordId: string;
+  keywordValue: string;
+  date: string;
+  resultList: SerpdinoSerpResult[];
+  /** Domains that were on the previous check and are gone now. */
+  droppedDomains?: { domain: string; previousPosition: number | null; movement?: SerpdinoMovement }[];
+  hasPreviousData?: boolean;
+  aiOverviewResults?: SerpdinoAiOverviewResult[] | null;
+  aiContainsOurDomain?: boolean;
+}
+
+/** One check of a keyword on a day: what the table cell shows and opens. */
+export interface DayCheck {
+  /** keyword-updates update _id: the keywordUpdateId of its results page. */
+  updateId: string;
+  date: string;
+  position: number | null;
+  url: string | null;
+  aiOverview: boolean;
+  ourDomainInAiOverview: boolean;
+}
+
 /** One row of the positions table, built from keyword-updates. */
 export interface KeywordPosition {
   id: string;
@@ -90,6 +141,22 @@ export interface KeywordPosition {
   history: { date: string; position: number | null }[];
   /** Position per day, key YYYY-MM-DD (UTC). Days without a check are absent. */
   positionsByDay: Record<string, number | null>;
+  /** The check behind each day, key YYYY-MM-DD (UTC). */
+  checksByDay: Record<string, DayCheck>;
+  /** The latest check (its results page opens from the Position column). */
+  latestUpdateId: string | null;
+  /** The latest results page had an AI Overview. */
+  aiOverview: boolean;
+  /** The site is cited in that AI Overview. */
+  ourDomainInAiOverview: boolean;
+  /** Site URLs ranking for the keyword at once on the latest check. */
+  cannibalization: number;
+  /** Monthly search volume, last 12 months, oldest first. */
+  volumeTrend: number[];
+  /** Google Ads competition index 0–100. */
+  competition: number | null;
+  cpcLow: number | null;
+  cpcHigh: number | null;
 }
 
 /** Bulk keyword-volumes entry (compact names as returned by the API). */

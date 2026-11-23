@@ -1,7 +1,7 @@
 {
   "name": "@alex-pierierodov/serpdino-positions",
-  "version": "0.1.0",
-  "description": "Show SerpDino Google rank tracking positions in your own site's admin. Server-side API client, a ready Next.js page and an optional Basic Auth guard.",
+  "version": "0.2.1",
+  "description": "Show SerpDino Google rank tracking positions in your own site's admin: interactive table with search, filters, sorting and the saved Google results page of every check. Server-side API client, a ready Next.js page and an optional Basic Auth guard.",
   "keywords": [
     "serpdino",
     "rank-tracker",
@@ -24,6 +24,10 @@
     "./next": {
       "types": "./dist/next/index.d.ts",
       "default": "./dist/next/index.js"
+    },
+    "./next/route": {
+      "types": "./dist/next/route.d.ts",
+      "default": "./dist/next/route.js"
     },
     "./styles.css": "./styles.css"
   },

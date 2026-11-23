@@ -1,7 +1,10 @@
 import type { SerpdinoClient } from './client.js';
 import type {
+  DayCheck,
   KeywordPosition,
   KeywordUpdatesOptions,
+  SerpdinoKeyword,
+  SerpdinoKeywordUpdate,
   SerpdinoKeywordUpdatesEntry,
   SerpdinoVolumeEntry,
 } from './types.js';
@@ -45,14 +48,21 @@ export function toKeywordPositions(
 ): KeywordPosition[] {
   const rows = Object.entries(data).map(([id, entry]): KeywordPosition => {
     const keywordId = entry.keyword?._id ?? id;
+    // Only finished checks: one still "processing" has no position yet and would read as "not ranking".
     const checks = (entry.updates ?? [])
-      .filter((update) => update.status !== 'failed' && update.status !== 'error')
+      .filter(isFinishedCheck)
       .slice()
       .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
 
     const history = checks.map((update) => ({ date: update.date, position: positionOf(update.position) }));
     const positionsByDay: Record<string, number | null> = {};
-    for (const point of history) positionsByDay[dayKey(point.date)] = point.position; // last check of a day wins
+    const checksByDay: Record<string, DayCheck> = {};
+    for (const update of checks) {
+      const day = dayKey(update.date); // the last check of a day wins
+      const check = toDayCheck(update);
+      positionsByDay[day] = check.position;
+      checksByDay[day] = check;
+    }
 
     const latest = checks.at(-1);
     const previous = checks.at(-2);
@@ -77,10 +87,19 @@ export function toKeywordPositions(
       previousPosition,
       change: position !== null && previousPosition !== null ? previousPosition - position : null,
       bestPosition: ranked.length ? Math.min(...ranked) : null,
-      url: latest?.position?.url ?? null,
+      url: latest ? validUrl(latest.position?.url) : null,
       checkedAt: latest?.date ?? null,
       history,
       positionsByDay,
+      checksByDay,
+      latestUpdateId: latest?._id ?? null,
+      aiOverview: Boolean(latest?.aiSerpId),
+      ourDomainInAiOverview: Boolean(latest?.ourDomainInAiOverview),
+      cannibalization: latest?.cannibalizationCount ?? 0,
+      volumeTrend: volumeEntry?.tr?.length ? volumeEntry.tr.slice(-12) : monthlyVolumes(entry.keyword),
+      competition: volumeEntry?.ci ?? null,
+      cpcLow: volumeEntry?.cl ?? null,
+      cpcHigh: volumeEntry?.ch ?? null,
     };
   });
 
@@ -90,6 +109,22 @@ export function toKeywordPositions(
     if (a.position !== null && b.position !== null && a.position !== b.position) return a.position - b.position;
     return a.keyword.localeCompare(b.keyword);
   });
+}
+
+/** Colour bands of a Google position, best to worst. */
+export const POSITION_TIERS = ['top1', 'top3', 'top5', 'top10', 'top20', 'top50', 'rest'] as const;
+export type PositionTier = (typeof POSITION_TIERS)[number] | 'none';
+
+/** The colour band of a position: 1, 2–3, 4–5, 6–10, 11–20, 21–50, 51+, or "none" when not ranked. */
+export function positionTier(position: number | null): PositionTier {
+  if (position === null) return 'none';
+  if (position <= 1) return 'top1';
+  if (position <= 3) return 'top3';
+  if (position <= 5) return 'top5';
+  if (position <= 10) return 'top10';
+  if (position <= 20) return 'top20';
+  if (position <= 50) return 'top50';
+  return 'rest';
 }
 
 /** Every checked day across the rows, newest first (YYYY-MM-DD) — the date columns of the table. */
@@ -128,6 +163,34 @@ export function summarize(rows: KeywordPosition[]) {
       : null,
     estimatedClicks: rows.reduce((sum, row) => sum + (row.estimatedClicks ?? 0), 0),
   };
+}
+
+function isFinishedCheck(update: SerpdinoKeywordUpdate): boolean {
+  return !update.status || update.status === 'success';
+}
+
+function toDayCheck(update: SerpdinoKeywordUpdate): DayCheck {
+  return {
+    updateId: update._id,
+    date: update.date,
+    position: positionOf(update.position),
+    url: validUrl(update.position?.url),
+    aiOverview: Boolean(update.aiSerpId),
+    ourDomainInAiOverview: Boolean(update.ourDomainInAiOverview),
+  };
+}
+
+/** SerpDino writes "-" for "no URL". */
+function validUrl(url: string | undefined): string | null {
+  return url && /^https?:\/\//.test(url) ? url : null;
+}
+
+/** Last 12 monthly volumes from the keyword's volume history, oldest first. */
+function monthlyVolumes(keyword: SerpdinoKeyword | undefined): number[] {
+  const months = (keyword?.volume ?? [])
+    .flatMap(({ year, months }) => months.map(({ month, value }) => ({ key: year * 12 + month, value })))
+    .sort((a, b) => a.key - b.key);
+  return months.slice(-12).map((month) => month.value);
 }
 
 function positionOf(result: { position?: number } | null | undefined): number | null {
