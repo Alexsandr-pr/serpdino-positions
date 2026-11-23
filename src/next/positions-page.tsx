@@ -39,8 +39,8 @@ export interface SerpdinoPositionsPageProps {
  *
  * ```js
  * // app/admin/positions/page.js
- * import { SerpdinoPositionsPage } from '@alexsandr-pr/serpdino-positions/next';
- * import '@alexsandr-pr/serpdino-positions/styles.css';
+ * import { SerpdinoPositionsPage } from '@alex-pierierodov/serpdino-positions/next';
+ * import '@alex-pierierodov/serpdino-positions/styles.css';
  *
  * export default function Page({ searchParams }) {
  *   return <SerpdinoPositionsPage searchParams={searchParams} domain="example.com" />;

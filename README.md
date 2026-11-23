@@ -1,4 +1,4 @@
-# @alexsandr-pr/serpdino-positions
+# @alex-pierierodov/serpdino-positions
 
 Show your [SerpDino](https://serpdino.com) Google rankings inside your own site's admin.
 
@@ -12,7 +12,7 @@ Unofficial package built on the public [SerpDino REST API](https://serpdino.com/
 ## Install
 
 ```bash
-npm i @alexsandr-pr/serpdino-positions
+npm i @alex-pierierodov/serpdino-positions
 ```
 
 ## Set up a site (Next.js App Router)
@@ -28,8 +28,8 @@ SERPDINO_SITE_DOMAIN=example.com
 2. Add the page, e.g. `app/admin/positions/page.js`:
 
 ```js
-import { SerpdinoPositionsPage } from '@alexsandr-pr/serpdino-positions/next';
-import '@alexsandr-pr/serpdino-positions/styles.css';
+import { SerpdinoPositionsPage } from '@alex-pierierodov/serpdino-positions/next';
+import '@alex-pierierodov/serpdino-positions/styles.css';
 
 export const metadata = { robots: { index: false, follow: false } };
 
@@ -41,7 +41,7 @@ export default function Page({ searchParams }) {
 3. Close the admin route. With your own auth, put the page behind it. Otherwise use the built-in Basic Auth in `proxy.js` (Next.js 16) or `middleware.js` (Next.js 15 and earlier):
 
 ```js
-import { checkBasicAuth } from '@alexsandr-pr/serpdino-positions';
+import { checkBasicAuth } from '@alex-pierierodov/serpdino-positions';
 
 export function proxy(request) {
   // user: SERPDINO_ADMIN_USER (default "admin"), password: SERPDINO_ADMIN_PASSWORD
@@ -98,7 +98,7 @@ Dark colors apply with `prefers-color-scheme: dark`, `[data-theme='dark']` or `.
 ## API client (any Node.js server)
 
 ```js
-import { createSerpdinoClient, getKeywordPositions, SerpdinoError } from '@alexsandr-pr/serpdino-positions';
+import { createSerpdinoClient, getKeywordPositions, SerpdinoError } from '@alex-pierierodov/serpdino-positions';
 
 const serpdino = createSerpdinoClient({ apiKey: process.env.SERPDINO_API_KEY });
 

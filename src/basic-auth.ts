@@ -13,7 +13,7 @@ export interface BasicAuthOptions {
  *
  * ```js
  * // proxy.js (Next.js 16) or middleware.js
- * import { checkBasicAuth } from '@alexsandr-pr/serpdino-positions';
+ * import { checkBasicAuth } from '@alex-pierierodov/serpdino-positions';
  * export function proxy(request) { return checkBasicAuth(request) ?? undefined; }
  * export const config = { matcher: ['/admin/:path*'] };
  * ```

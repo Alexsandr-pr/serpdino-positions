@@ -1,5 +1,5 @@
 {
-  "name": "@alexsandr-pr/serpdino-positions",
+  "name": "@alex-pierierodov/serpdino-positions",
   "version": "0.1.0",
   "description": "Show SerpDino Google rank tracking positions in your own site's admin. Server-side API client, a ready Next.js page and an optional Basic Auth guard.",
   "keywords": [
@@ -11,7 +11,7 @@
     "nextjs"
   ],
   "license": "MIT",
-  "author": "Alexsandr-pr",
+  "author": "alex-pierierodov",
   "type": "module",
   "sideEffects": [
     "*.css"
