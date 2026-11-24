@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   checkBasicAuth,
@@ -10,6 +11,10 @@ import {
   normalizeDomain,
   pickProject,
   positionTier,
+  bucketKey,
+  toCompetitorPositions,
+  visibilityByKey,
+  memo,
   SerpdinoError,
   summarize,
   toKeywordPositions,
@@ -196,4 +201,53 @@ test('results page route refuses a missing or malformed id', async () => {
   const { GET } = await import('../dist/next/route.js');
   assert.equal((await GET(new Request('https://site.com/api/serpdino/serp'))).status, 400);
   assert.equal((await GET(new Request('https://site.com/api/serpdino/serp?keywordUpdateId=../projects'))).status, 400);
+});
+
+test('bucketKey: day, ISO week from Monday, month', () => {
+  assert.equal(bucketKey('2026-11-23T21:52:20.894Z'), '2026-11-23');
+  assert.equal(bucketKey('2026-11-23T21:52:20.894Z', 'week'), '2026-11-23'); // a Monday
+  assert.equal(bucketKey('2026-11-22T08:00:00.000Z', 'week'), '2026-11-16'); // Sunday → its Monday
+  assert.equal(bucketKey('2026-11-22T08:00:00.000Z', 'month'), '2026-11-01');
+});
+
+test('competitor positions by keyword and column; 0 means not ranking', () => {
+  const positions = toCompetitorPositions({
+    kw1: {
+      keyword: { _id: 'kw1', value: 'seo tools', geoCode: 'US', langCode: 'en' },
+      updates: [
+        { _id: 'a', date: '2025-01-15T12:00:00.000Z', status: 'success', position: { position: 4 } },
+        { _id: 'b', date: '2025-01-16T12:00:00.000Z', status: 'success', position: { position: 0 } },
+        { _id: 'c', date: '2025-01-17T12:00:00.000Z', status: 'processing' },
+      ],
+    },
+  });
+  assert.deepEqual(positions.kw1, { latest: null, byKey: { '2025-01-15': 4, '2025-01-16': null } });
+});
+
+test('visibility: clicks and average position per column, unchecked rows skipped', () => {
+  const rows = toKeywordPositions(KEYWORD_UPDATES);
+  const series = visibilityByKey(rows, ['2025-01-15', '2025-01-16'], (row, key) =>
+    key in row.checksByDay ? row.checksByDay[key].position : undefined
+  );
+  assert.deepEqual(series[0], { key: '2025-01-15', clicks: Math.round(8100 * 0.011), averagePosition: 8, checked: 2 });
+  assert.equal(series[1].averagePosition, 9);
+  assert.equal(series[1].checked, 2);
+});
+
+test('memo: one load per key until it expires, fresh reloads', async () => {
+  let loads = 0;
+  const load = async () => ++loads;
+  assert.equal(await memo('k', 60, load), 1);
+  assert.equal(await memo('k', 60, load), 1);
+  assert.equal(await memo('k', 60, load, { fresh: true }), 2);
+  assert.equal(await memo('k', 0, load), 3); // no caching
+});
+
+test('styles: media queries intact, hover never changes the table', () => {
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.equal((css.match(/{/g) ?? []).length, (css.match(/}/g) ?? []).length);
+  assert.match(css, /@media \(prefers-color-scheme: dark\) {\s*:root:not\(\[data-theme='light'\]\) \.sdp {/);
+  assert.match(css, /@media \(max-width: 600px\) {/);
+  const hoverRules = css.split('}').filter((rule) => rule.includes(':hover'));
+  for (const rule of hoverRules) assert.match(rule, /\.sdp \.sdp-table tbody tr:hover/, rule);
 });

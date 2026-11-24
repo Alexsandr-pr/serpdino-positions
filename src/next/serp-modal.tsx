@@ -23,10 +23,12 @@ export interface SerpModalProps {
   cache: Map<string, SnapshotState>;
   onClose(): void;
   onNavigate(day: string): void;
+  /** Label of a column (day, week, month) for the date line. */
+  formatKey?(key: string): string;
 }
 
 /** Popup with the Google results page that one keyword check saw. */
-export function SerpModal({ row, day, endpoint, ourDomains, cache, onClose, onNavigate }: SerpModalProps) {
+export function SerpModal({ row, day, endpoint, ourDomains, cache, onClose, onNavigate, formatKey }: SerpModalProps) {
   const check = row.checksByDay[day];
   const updateId = check?.updateId;
   const [state, setState] = useState<SnapshotState>(() => (updateId && cache.get(updateId)) || { status: 'loading' });
@@ -92,7 +94,7 @@ export function SerpModal({ row, day, endpoint, ourDomains, cache, onClose, onNa
             <h2 className="sdp-modal-title">{row.keyword}</h2>
             <p className="sdp-modal-meta">
               <span>{row.serp || 'Google'}</span>
-              <span>{check ? formatDate(check.date) : day}</span>
+              <span>{check ? formatDate(check.date) : (formatKey?.(day) ?? day)}</span>
               <span>
                 Our position: <strong>{check?.position ?? 'not ranking'}</strong>
               </span>

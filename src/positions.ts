@@ -1,8 +1,11 @@
 import type { SerpdinoClient } from './client.js';
 import type {
+  CompetitorPositions,
   DayCheck,
+  Grouping,
   KeywordPosition,
   KeywordUpdatesOptions,
+  SerpdinoCompetitorEntry,
   SerpdinoKeyword,
   SerpdinoKeywordUpdate,
   SerpdinoKeywordUpdatesEntry,
@@ -35,6 +38,8 @@ export interface ToKeywordPositionsOptions {
   /** Bulk keyword-volumes map; fills the volume when keyword-updates has none. */
   volumes?: Record<string, SerpdinoVolumeEntry>;
   ctrCurve?: number[];
+  /** Column of a check: its day, ISO week or month. Default: day. */
+  group?: Grouping;
 }
 
 /**
@@ -44,7 +49,7 @@ export interface ToKeywordPositionsOptions {
  */
 export function toKeywordPositions(
   data: Record<string, SerpdinoKeywordUpdatesEntry>,
-  { volumes = {}, ctrCurve = DEFAULT_CTR_CURVE }: ToKeywordPositionsOptions = {}
+  { volumes = {}, ctrCurve = DEFAULT_CTR_CURVE, group = 'day' }: ToKeywordPositionsOptions = {}
 ): KeywordPosition[] {
   const rows = Object.entries(data).map(([id, entry]): KeywordPosition => {
     const keywordId = entry.keyword?._id ?? id;
@@ -58,7 +63,7 @@ export function toKeywordPositions(
     const positionsByDay: Record<string, number | null> = {};
     const checksByDay: Record<string, DayCheck> = {};
     for (const update of checks) {
-      const day = dayKey(update.date); // the last check of a day wins
+      const day = bucketKey(update.date, group); // the last check of a day (week, month) wins
       const check = toDayCheck(update);
       positionsByDay[day] = check.position;
       checksByDay[day] = check;
@@ -127,6 +132,64 @@ export function positionTier(position: number | null): PositionTier {
   return 'rest';
 }
 
+/**
+ * Column key of a date: the day (YYYY-MM-DD, UTC), the Monday of its ISO week, or the first of its month.
+ */
+export function bucketKey(date: string, group: Grouping = 'day'): string {
+  const day = new Date(date);
+  if (group === 'month') return `${day.toISOString().slice(0, 7)}-01`;
+  if (group === 'week') {
+    const monday = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    return monday.toISOString().slice(0, 10);
+  }
+  return day.toISOString().slice(0, 10);
+}
+
+/** A competitor's positions per keyword and column (0 or no result = not ranking). */
+export function toCompetitorPositions(
+  data: Record<string, SerpdinoCompetitorEntry>,
+  group: Grouping = 'day'
+): CompetitorPositions {
+  const result: CompetitorPositions = {};
+  for (const [id, entry] of Object.entries(data)) {
+    const checks = (entry.updates ?? []).filter(isFinishedCheck).sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+    const byKey: Record<string, number | null> = {};
+    for (const update of checks) byKey[bucketKey(update.date, group)] = positionOf(update.position);
+    const latest = checks.at(-1);
+    result[entry.keyword?._id ?? id] = { latest: latest ? positionOf(latest.position) : null, byKey };
+  }
+  return result;
+}
+
+/**
+ * Estimated monthly clicks of a set of keywords per column — the visibility line.
+ * `positionAt` gives the position of a row in a column (yours or a competitor's).
+ */
+export function visibilityByKey(
+  rows: KeywordPosition[],
+  keys: string[],
+  positionAt: (row: KeywordPosition, key: string) => number | null | undefined,
+  ctrCurve: number[] = DEFAULT_CTR_CURVE
+): { key: string; clicks: number; averagePosition: number | null; checked: number }[] {
+  return keys.map((key) => {
+    let clicks = 0;
+    let sum = 0;
+    let ranked = 0;
+    let checked = 0;
+    for (const row of rows) {
+      const position = positionAt(row, key);
+      if (position === undefined) continue;
+      checked += 1;
+      if (position === null) continue;
+      ranked += 1;
+      sum += position;
+      clicks += estimateClicks(position, row.volume, ctrCurve) ?? 0;
+    }
+    return { key, clicks, averagePosition: ranked ? Math.round((sum / ranked) * 10) / 10 : null, checked };
+  });
+}
+
 /** Every checked day across the rows, newest first (YYYY-MM-DD) — the date columns of the table. */
 export function collectDays(rows: KeywordPosition[]): string[] {
   const days = new Set<string>();
@@ -138,15 +201,17 @@ export function collectDays(rows: KeywordPosition[]): string[] {
 export async function getKeywordPositions(
   client: SerpdinoClient,
   projectId: string,
-  options?: KeywordUpdatesOptions & { ctrCurve?: number[] }
+  options?: KeywordUpdatesOptions & { ctrCurve?: number[]; group?: Grouping }
 ): Promise<KeywordPosition[]> {
-  const { ctrCurve, ...query } = options ?? {};
+  const { ctrCurve, group, ...query } = options ?? {};
+  const aggregation = group === 'week' ? 'weekly' : group === 'month' ? 'monthly' : undefined;
   const [updates, volumes] = await Promise.all([
-    client.getKeywordUpdates(projectId, query),
+    // Over 2 MB for a month of a few hundred keywords: too big for the Next.js data cache.
+    client.getKeywordUpdates(projectId, { aggregation, ...query }, { cache: false }),
     // Volumes only fill gaps, so a failure here must not break the table.
     client.getKeywordVolumes(projectId).catch(() => ({})),
   ]);
-  return toKeywordPositions(updates, { volumes, ctrCurve });
+  return toKeywordPositions(updates, { volumes, ctrCurve, group });
 }
 
 /** Short summary for a project header. */
@@ -195,8 +260,4 @@ function monthlyVolumes(keyword: SerpdinoKeyword | undefined): number[] {
 
 function positionOf(result: { position?: number } | null | undefined): number | null {
   return typeof result?.position === 'number' && result.position > 0 ? result.position : null;
-}
-
-function dayKey(date: string): string {
-  return new Date(date).toISOString().slice(0, 10);
 }

@@ -3,26 +3,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { collectDays, positionTier } from '../positions.js';
-import type { KeywordPosition } from '../types.js';
+import { collectDays, positionTier, visibilityByKey } from '../positions.js';
+import type { CompetitorPositions, Grouping, KeywordPosition, SerpdinoPage } from '../types.js';
 
+import { PagesTable } from './pages-table.js';
 import { SerpModal } from './serp-modal.js';
+import { VisibilityChart } from './visibility-chart.js';
 import type { SnapshotState } from './serp-modal.js';
 
 export interface PositionsExplorerProps {
   rows: KeywordPosition[];
+  /** Ranking pages of the site (Pages tab). */
+  pages?: SerpdinoPage[];
   /** The site's domain and aliases, normalized ("example.com"). */
   ourDomains: string[];
   /** Route handler that returns one results page (see `next/route`). */
   serpEndpoint: string;
-  /** Days of history shown now, and the choices of the period select. */
+  /** Days of history shown now (?days=), and the choices of the period select. */
   period: number;
   periodOptions: number[];
-  /** Query parameter of the period. */
-  periodParam: string;
+  /** Columns by day, week or month (?group=). */
+  group: Grouping;
+  /** Competitor domains of the project, and the one shown next to the site (?competitor=). */
+  competitors?: string[];
+  competitor?: { domain: string; positions: CompetitorPositions } | null;
+  ctrCurve?: number[];
 }
 
-type FilterKey = 'all' | 'top3' | 'top10' | 'top11_50' | 'notRanking' | 'up' | 'down' | 'ai' | 'aiOurs';
+type FilterKey = 'all' | 'top3' | 'top10' | 'top11_50' | 'notRanking' | 'up' | 'down' | 'ai' | 'aiOurs' | 'ahead' | 'behind';
 type SortState = { key: string; dir: 1 | -1 } | null;
 
 const FILTERS: Record<FilterKey, (row: KeywordPosition) => boolean> = {
@@ -35,7 +43,25 @@ const FILTERS: Record<FilterKey, (row: KeywordPosition) => boolean> = {
   down: (row) => (row.change ?? 0) < 0,
   ai: (row) => row.aiOverview,
   aiOurs: (row) => row.ourDomainInAiOverview,
+  // Need the competitor: see matches().
+  ahead: () => false,
+  behind: () => false,
 };
+
+/** Our latest position compared with the competitor's: positive = we are higher. */
+function versus(row: KeywordPosition, competitor: CompetitorPositions | undefined): number | null {
+  const theirs = competitor?.[row.id]?.latest ?? null;
+  if (row.position === null && theirs === null) return null;
+  if (row.position === null) return -Infinity;
+  if (theirs === null) return Infinity;
+  return theirs - row.position;
+}
+
+function matches(key: FilterKey, row: KeywordPosition, competitor: CompetitorPositions | undefined): boolean {
+  if (key === 'ahead') return (versus(row, competitor) ?? 0) > 0;
+  if (key === 'behind') return (versus(row, competitor) ?? 0) < 0;
+  return FILTERS[key](row);
+}
 
 /** Columns that can be hidden; Keyword, Position and the days always show. */
 const OPTIONAL_COLUMNS = [
@@ -55,7 +81,20 @@ const DEFAULT_HIDDEN: OptionalColumn[] = ['cpc', 'competition'];
 const STORAGE_KEY = 'sdp-hidden-columns';
 
 /** Interactive positions table: search, filters, sorting, columns, CSV and the results page of any check. */
-export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, periodOptions, periodParam }: PositionsExplorerProps) {
+export function PositionsExplorer({
+  rows,
+  pages = [],
+  ourDomains,
+  serpEndpoint,
+  period,
+  periodOptions,
+  group,
+  competitors = [],
+  competitor = null,
+  ctrCurve,
+}: PositionsExplorerProps) {
+  const [tab, setTab] = useState<'keywords' | 'pages'>('keywords');
+  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [serp, setSerp] = useState('all');
@@ -89,6 +128,8 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
   const shows = (column: OptionalColumn) => !hidden.has(column);
 
   const days = useMemo(() => collectDays(rows), [rows]);
+  const competitorPositions = competitor?.positions;
+  const formatKey = useCallback((key: string) => formatColumn(key, group), [group]);
   const serps = useMemo(() => [...new Set(rows.map((row) => row.serp).filter(Boolean))].sort(), [rows]);
 
   // Search and SERP narrow everything, including the tile counts; the tile filter narrows the table.
@@ -103,14 +144,33 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
   }, [rows, query, serp]);
 
   const visible = useMemo(() => {
-    const filtered = scoped.filter(FILTERS[filter]);
+    const filtered = scoped.filter((row) => matches(filter, row, competitorPositions));
     if (!sort) return filtered;
-    return filtered.slice().sort((a, b) => compare(sortValue(a, sort.key), sortValue(b, sort.key), sort.dir));
-  }, [scoped, filter, sort]);
+    return filtered
+      .slice()
+      .sort((a, b) => compare(sortValue(a, sort.key, competitorPositions), sortValue(b, sort.key, competitorPositions), sort.dir));
+  }, [scoped, filter, sort, competitorPositions]);
+
+  const chart = useMemo(() => {
+    const keys = days.slice().reverse();
+    const ours = visibilityByKey(scoped, keys, (row, key) => (key in row.checksByDay ? row.checksByDay[key].position : undefined), ctrCurve);
+    const theirs = competitorPositions
+      ? visibilityByKey(
+          scoped,
+          keys,
+          (row, key) => {
+            const byKey = competitorPositions[row.id]?.byKey;
+            return byKey && key in byKey ? byKey[key] : undefined;
+          },
+          ctrCurve
+        )
+      : null;
+    return { ours, theirs };
+  }, [days, scoped, competitorPositions, ctrCurve]);
 
   const stats = useMemo(() => {
     const ranked = scoped.map((row) => row.position).filter((value): value is number => value !== null);
-    const count = (key: FilterKey) => scoped.filter(FILTERS[key]).length;
+    const count = (key: FilterKey) => scoped.filter((row) => matches(key, row, competitorPositions)).length;
     return {
       all: scoped.length,
       top3: count('top3'),
@@ -121,10 +181,12 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
       down: count('down'),
       ai: count('ai'),
       aiOurs: count('aiOurs'),
+      ahead: count('ahead'),
+      behind: count('behind'),
       average: ranked.length ? Math.round((ranked.reduce((sum, value) => sum + value, 0) / ranked.length) * 10) / 10 : null,
       clicks: scoped.reduce((sum, row) => sum + (row.estimatedClicks ?? 0), 0),
     };
-  }, [scoped]);
+  }, [scoped, competitorPositions]);
 
   const onSort = (key: string) => {
     setSort((current) => {
@@ -138,9 +200,13 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
   const closeModal = useCallback(() => setOpen(null), []);
   const navigateModal = useCallback((day: string) => setOpen((current) => (current ? { ...current, day } : current)), []);
 
-  const changePeriod = (value: string) => {
+  /** Period, grouping and competitor are loaded on the server: change the URL and reload. */
+  const setParam = (name: string, value: string | null) => {
     const url = new URL(window.location.href);
-    url.searchParams.set(periodParam, value);
+    if (value) url.searchParams.set(name, value);
+    else url.searchParams.delete(name);
+    url.searchParams.delete('fresh');
+    setLoading(true);
     window.location.assign(url.toString());
   };
 
@@ -156,10 +222,33 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
     { key: 'ai', label: 'AI Overview', value: stats.ai },
     { key: 'aiOurs', label: 'Cited in AI', value: stats.aiOurs },
     { label: 'Est. clicks/mo', value: stats.clicks.toLocaleString('en-US') },
+    ...(competitor
+      ? [
+          { key: 'ahead' as const, label: `Ahead of ${competitor.domain}`, value: stats.ahead, tone: 'up' },
+          { key: 'behind' as const, label: `Behind ${competitor.domain}`, value: stats.behind, tone: 'down' },
+        ]
+      : []),
   ];
 
   return (
-    <>
+    <div className={loading ? 'sdp-loading' : undefined}>
+      <div className="sdp-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'keywords'} onClick={() => setTab('keywords')}>
+          Keywords <span className="sdp-muted">{rows.length}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'pages'} onClick={() => setTab('pages')}>
+          Pages <span className="sdp-muted">{pages.length}</span>
+        </button>
+      </div>
+
+      {tab === 'keywords' && (
+        <>
+      <VisibilityChart
+        series={chart.ours}
+        competitor={competitor && chart.theirs ? { domain: competitor.domain, series: chart.theirs } : null}
+        formatKey={formatKey}
+      />
+
       <div className="sdp-summary">
         {tiles.map((tile) =>
           tile.key ? (
@@ -201,13 +290,33 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
             ))}
           </select>
         )}
-        <select className="sdp-select" value={String(period)} onChange={(event) => changePeriod(event.target.value)} aria-label="Period">
+        <select className="sdp-select" value={String(period)} onChange={(event) => setParam('days', event.target.value)} aria-label="Period">
           {periodOptions.map((option) => (
             <option key={option} value={option}>
               Last {option} days
             </option>
           ))}
         </select>
+        <select className="sdp-select" value={group} onChange={(event) => setParam('group', event.target.value)} aria-label="Columns by">
+          <option value="day">By day</option>
+          <option value="week">By week</option>
+          <option value="month">By month</option>
+        </select>
+        {competitors.length > 0 && (
+          <select
+            className="sdp-select"
+            value={competitor?.domain ?? ''}
+            onChange={(event) => setParam('competitor', event.target.value || null)}
+            aria-label="Competitor"
+          >
+            <option value="">No competitor</option>
+            {competitors.map((domain) => (
+              <option key={domain} value={domain}>
+                vs {domain}
+              </option>
+            ))}
+          </select>
+        )}
         <details className="sdp-columns">
           <summary className="sdp-button">Columns</summary>
           <div className="sdp-columns-menu">
@@ -218,7 +327,7 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
             ))}
           </div>
         </details>
-        <button type="button" className="sdp-button" onClick={() => downloadCsv(visible, days)}>
+        <button type="button" className="sdp-button" onClick={() => downloadCsv(visible, days, competitor)}>
           Export CSV
         </button>
         <span className="sdp-count">
@@ -246,13 +355,17 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
                   <SortHeader label="Comp." sortKey="competition" sort={sort} onSort={onSort} className="sdp-num" />
                 )}
                 <SortHeader label="Position" sortKey="position" sort={sort} onSort={onSort} className="sdp-center" />
+                {competitor && (
+                  <SortHeader label={competitor.domain} sortKey="competitor" sort={sort} onSort={onSort} className="sdp-center sdp-competitor-head" />
+                )}
+                {competitor && <SortHeader label="vs" sortKey="versus" sort={sort} onSort={onSort} className="sdp-center" />}
                 {shows('change') && <SortHeader label="Change" sortKey="change" sort={sort} onSort={onSort} className="sdp-center" />}
                 {shows('best') && <SortHeader label="Best" sortKey="best" sort={sort} onSort={onSort} className="sdp-center" />}
                 {shows('url') && <th>URL</th>}
                 {days.map((day) => (
                   <SortHeader
                     key={day}
-                    label={formatDay(day)}
+                    label={formatKey(day)}
                     sortKey={`day:${day}`}
                     sort={sort}
                     onSort={onSort}
@@ -299,6 +412,12 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
                     position={row.position}
                     onOpen={row.latestUpdateId ? () => openLatest(row, setOpen) : undefined}
                   />
+                  {competitor && <PositionCell position={competitorPositions?.[row.id]?.latest ?? null} />}
+                  {competitor && (
+                    <td className="sdp-center">
+                      <Versus value={versus(row, competitorPositions)} />
+                    </td>
+                  )}
                   {shows('change') && (
                     <td className="sdp-center">
                       <Change value={row.change} />
@@ -324,6 +443,7 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
                         position={check.position}
                         ai={check.aiOverview}
                         aiOurs={check.ourDomainInAiOverview}
+                        competitor={competitor ? (competitorPositions?.[row.id]?.byKey[day] ?? null) : undefined}
                         className="sdp-day"
                         onOpen={() => setOpen({ rowId: row.id, day })}
                       />
@@ -340,6 +460,26 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
         </div>
       )}
 
+        </>
+      )}
+
+      {tab === 'pages' && (
+        <>
+          <div className="sdp-toolbar">
+            <input
+              type="search"
+              className="sdp-input sdp-search"
+              placeholder="Search pages or their keywords (use -word to exclude)"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search pages"
+            />
+            <span className="sdp-count">{pages.length} pages</span>
+          </div>
+          <PagesTable pages={pages} rows={rows} query={query} />
+        </>
+      )}
+
       {open && openRow && (
         <SerpModal
           row={openRow}
@@ -349,9 +489,10 @@ export function PositionsExplorer({ rows, ourDomains, serpEndpoint, period, peri
           cache={cache}
           onClose={closeModal}
           onNavigate={navigateModal}
+          formatKey={formatKey}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -367,18 +508,26 @@ function PositionCell({
   ai = false,
   aiOurs = false,
   className = '',
+  competitor,
   onOpen,
 }: {
   position: number | null;
   ai?: boolean;
   aiOurs?: boolean;
   className?: string;
+  /** The competitor's position in the same column; undefined = no competitor shown. */
+  competitor?: number | null;
   onOpen?: () => void;
 }) {
   const content = (
     <>
       {position ?? '—'}
       {ai && <span className={`sdp-ai-dot ${aiOurs ? 'sdp-ai-dot-ours' : ''}`}>✦</span>}
+      {competitor !== undefined && (
+        <span className="sdp-comp" title="Competitor position">
+          {competitor ?? '—'}
+        </span>
+      )}
     </>
   );
   return (
@@ -415,6 +564,17 @@ function SortHeader({
         <span className="sdp-sort-arrow">{active ? (sort!.dir === 1 ? '↑' : '↓') : '↕'}</span>
       </button>
     </th>
+  );
+}
+
+function Versus({ value }: { value: number | null }) {
+  if (value === null || value === 0) return <span className="sdp-muted">—</span>;
+  if (!Number.isFinite(value)) return <span className={value > 0 ? 'sdp-up' : 'sdp-down'}>{value > 0 ? 'only us' : 'only them'}</span>;
+  return (
+    <span className={value > 0 ? 'sdp-up' : 'sdp-down'} title={value > 0 ? 'We are higher' : 'The competitor is higher'}>
+      {value > 0 ? '+' : '−'}
+      {Math.abs(value)}
+    </span>
   );
 }
 
@@ -483,12 +643,18 @@ function PositionLine({ history }: { history: { date: string; position: number |
 
 /** Positions and changes read best when the first click puts the best on top. */
 function defaultDir(key: string): 1 | -1 {
-  if (key === 'position' || key === 'best' || key.startsWith('day:')) return 1;
+  if (key === 'position' || key === 'best' || key === 'competitor' || key.startsWith('day:')) return 1;
   return -1;
 }
 
-function sortValue(row: KeywordPosition, key: string): number | string | null {
+function sortValue(row: KeywordPosition, key: string, competitor?: CompetitorPositions): number | string | null {
   switch (key) {
+    case 'competitor':
+      return competitor?.[row.id]?.latest ?? null;
+    case 'versus': {
+      const value = versus(row, competitor);
+      return value === null ? null : Math.max(-1000, Math.min(1000, value));
+    }
     case 'keyword':
       return row.keyword.toLowerCase();
     case 'serp':
@@ -521,8 +687,12 @@ function compare(a: number | string | null, b: number | string | null, dir: 1 | 
   return (a - b) * dir;
 }
 
-function downloadCsv(rows: KeywordPosition[], days: string[]) {
-  const header = ['Keyword', 'SERP', 'Volume', 'Est. clicks/mo', 'Position', 'Change', 'Best', 'URL', 'AI Overview', 'Cited in AI', ...days];
+function downloadCsv(rows: KeywordPosition[], days: string[], competitor: PositionsExplorerProps['competitor']) {
+  const header = [
+    'Keyword', 'SERP', 'Volume', 'Est. clicks/mo', 'Position', 'Change', 'Best', 'URL', 'AI Overview', 'Cited in AI',
+    ...(competitor ? [competitor.domain] : []),
+    ...days,
+  ];
   const lines = rows.map((row) => [
     row.keyword,
     row.serp,
@@ -534,6 +704,7 @@ function downloadCsv(rows: KeywordPosition[], days: string[]) {
     row.url ?? '',
     row.aiOverview ? 'yes' : '',
     row.ourDomainInAiOverview ? 'yes' : '',
+    ...(competitor ? [competitor.positions[row.id]?.latest ?? ''] : []),
     ...days.map((day) => (day in row.checksByDay ? (row.checksByDay[day].position ?? '-') : '')),
   ]);
   const csv = [header, ...lines].map((line) => line.map(csvCell).join(',')).join('\n');
@@ -561,8 +732,12 @@ function formatCpc(low: number | null, high: number | null): string {
   return `$${low.toFixed(2)}–${high.toFixed(2)}`;
 }
 
-function formatDay(day: string): string {
-  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+/** Column header: "Nov 23" for a day, "Nov 17" (the Monday) for a week, "Nov 2026" for a month. */
+function formatColumn(key: string, group: Grouping): string {
+  const date = new Date(`${key}T00:00:00Z`);
+  if (group === 'month') return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return group === 'week' ? `w/c ${label}` : label;
 }
 
 function shortUrl(url: string): string {

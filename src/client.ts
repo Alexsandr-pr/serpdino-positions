@@ -1,5 +1,7 @@
 import type {
   KeywordUpdatesOptions,
+  SerpdinoCapacity,
+  SerpdinoCompetitorEntry,
   SerpdinoKeywordUpdatesEntry,
   SerpdinoPage,
   SerpdinoProject,
@@ -47,11 +49,29 @@ export class SerpdinoError extends Error {
 
 type Query = Record<string, string | number | undefined>;
 
+/** Per-request options. `cache: false` skips the Next.js data cache (it refuses responses over 2 MB). */
+export interface RequestOptions {
+  cache?: boolean;
+}
+
 export interface SerpdinoClient {
   listProjects(): Promise<SerpdinoProject[]>;
   getProject(projectId: string): Promise<SerpdinoProject & { keywords?: unknown[] }>;
   /** Keyword positions with dated checks, keyed by keyword ID. Default range: last 30 days. */
-  getKeywordUpdates(projectId: string, options?: KeywordUpdatesOptions): Promise<Record<string, SerpdinoKeywordUpdatesEntry>>;
+  getKeywordUpdates(
+    projectId: string,
+    options?: KeywordUpdatesOptions,
+    request?: RequestOptions
+  ): Promise<Record<string, SerpdinoKeywordUpdatesEntry>>;
+  /** One competitor's position per keyword check, keyed by keyword ID. */
+  getCompetitorPositions(
+    projectId: string,
+    competitorDomain: string,
+    options?: { startDate?: string; endDate?: string },
+    request?: RequestOptions
+  ): Promise<Record<string, SerpdinoCompetitorEntry>>;
+  /** Keyword capacity of the account. */
+  getCapacity(): Promise<SerpdinoCapacity>;
   /** Search volume per keyword ID (bulk mode, compact field names). */
   getKeywordVolumes(projectId: string): Promise<Record<string, SerpdinoVolumeEntry>>;
   /** Ranking pages with average position, worst first. */
@@ -59,7 +79,7 @@ export interface SerpdinoClient {
   /** The Google results page saved by one keyword check (top 30 plus the site), with AI Overview. */
   getSerpSnapshot(keywordUpdateId: string): Promise<SerpdinoSerpSnapshot>;
   /** Raw GET for endpoints not wrapped here, e.g. `get('/api/user/capacity')`. */
-  get<T = unknown>(path: string, query?: Query): Promise<T>;
+  get<T = unknown>(path: string, query?: Query, request?: RequestOptions): Promise<T>;
 }
 
 /**
@@ -80,7 +100,7 @@ export function createSerpdinoClient(options: SerpdinoClientOptions = {}): Serpd
     throw new Error('serpdino-positions: the API client must run on the server, it would expose your API key.');
   }
 
-  async function get<T>(path: string, query: Query = {}): Promise<T> {
+  async function get<T>(path: string, query: Query = {}, request: RequestOptions = {}): Promise<T> {
     if (!apiKey) {
       throw new SerpdinoError('SerpDino API key is missing. Set SERPDINO_API_KEY or pass { apiKey }.', { status: 401 });
     }
@@ -93,7 +113,7 @@ export function createSerpdinoClient(options: SerpdinoClientOptions = {}): Serpd
     const init: RequestInit & { next?: { revalidate: number } } = {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
     };
-    if (revalidate > 0) init.next = { revalidate };
+    if (revalidate > 0 && request.cache !== false) init.next = { revalidate };
     else init.cache = 'no-store';
 
     const response = await fetchImpl(url, init);
@@ -120,12 +140,24 @@ export function createSerpdinoClient(options: SerpdinoClientOptions = {}): Serpd
       const body = await get<{ project: SerpdinoProject }>(`/api/projects/${encodeURIComponent(projectId)}`);
       return body.project;
     },
-    async getKeywordUpdates(projectId, opts = {}) {
-      const body = await get<{ data?: Record<string, SerpdinoKeywordUpdatesEntry> }>('/api/projects/keyword-updates', {
-        projectId,
-        ...opts,
-      });
+    async getKeywordUpdates(projectId, opts = {}, request) {
+      const body = await get<{ data?: Record<string, SerpdinoKeywordUpdatesEntry> }>(
+        '/api/projects/keyword-updates',
+        { projectId, ...opts },
+        request
+      );
       return body.data ?? {};
+    },
+    async getCompetitorPositions(projectId, competitorDomain, opts = {}, request) {
+      const body = await get<{ keywordHistory?: Record<string, SerpdinoCompetitorEntry> }>(
+        '/api/projects/competitor-positions',
+        { projectId, competitorDomain, ...opts },
+        request
+      );
+      return body.keywordHistory ?? {};
+    },
+    async getCapacity() {
+      return get<SerpdinoCapacity>('/api/user/capacity');
     },
     async getKeywordVolumes(projectId) {
       const body = await get<{ data?: Record<string, SerpdinoVolumeEntry> }>('/api/projects/keyword-volumes', { projectId });

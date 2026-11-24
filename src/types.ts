@@ -11,6 +11,10 @@ export interface SerpdinoProject {
   folder?: string | null;
   updateFrequency?: string;
   serpTop?: number;
+  /** Hour of the scheduled check, in updateTimezone. */
+  updateTime?: number;
+  updateTimezone?: string;
+  lastPositionUpdate?: string;
   createdDate?: string;
   type?: 'serp' | 'local' | 'monitor';
   shared?: boolean;
@@ -44,6 +48,9 @@ export interface SerpdinoKeywordUpdate {
   ourDomainInAiOverview?: boolean;
   /** How many of the site's URLs rank for the keyword at once. */
   cannibalizationCount?: number;
+  /** With weekly / monthly aggregation: "W47 2026", "Nov 2026". */
+  periodKey?: string;
+  sampleCount?: number;
 }
 
 export interface SerpdinoKeywordUpdatesEntry {
@@ -65,13 +72,41 @@ export interface KeywordUpdatesOptions {
 }
 
 export interface SerpdinoPage {
+  _id?: string;
   url: string;
-  path: string;
+  path?: string;
   keywordCount: number;
+  /** Keywords of the page in the top 10. */
+  top10Count?: number;
+  /** Keywords close to the top 10 (SerpDino "easy wins"). */
+  easyWinCount?: number;
   avgPosition: number;
   bestPosition: number;
-  keywords: { keywordId: string; value: string; position: number }[];
+  firstSeenAt?: string;
+  avgPositionTrend?: { date: string; avgPosition: number; keywordCount?: number }[];
+  keywords: { keywordId: string; bestPosition: number | null; latestPosition: number | null; lastSeenAt?: string }[];
 }
+
+/** GET /api/projects/competitor-positions: the competitor's position per keyword check. */
+export interface SerpdinoCompetitorEntry {
+  keyword: SerpdinoKeyword;
+  updates: SerpdinoKeywordUpdate[];
+}
+
+/** GET /api/user/capacity (only the fields shown). */
+export interface SerpdinoCapacity {
+  total: number;
+  booked: number;
+  available?: number;
+  projects?: number;
+  keywords?: number;
+}
+
+/** Columns of the table: one per day, ISO week (from Monday) or month. */
+export type Grouping = 'day' | 'week' | 'month';
+
+/** A competitor's positions by keyword id: the latest one and one per column. */
+export type CompetitorPositions = Record<string, { latest: number | null; byKey: Record<string, number | null> }>;
 
 export type SerpdinoMovement = { type: 'up' | 'down' | 'same' | 'new' | 'gone'; value: number | null };
 

@@ -34,7 +34,7 @@
   line-height: 1.5;
 }
 
-
+@media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .sdp {
     --sdp-bg: #141416;
     --sdp-fg: #ecebe8;
@@ -55,7 +55,7 @@
     --sdp-pos-top50: #6f4229;
     --sdp-pos-rest: #6c3242;
   }
-
+}
 
 [data-theme='dark'] .sdp,
 .dark .sdp {
@@ -825,7 +825,241 @@ th.sdp-day {
   font-size: 13px;
 }
 
+.sdp-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin: -8px 0 20px;
+  color: var(--sdp-muted);
+  font-size: 13px;
+}
 
+.sdp-info-refresh {
+  color: var(--sdp-accent);
+  text-decoration: none;
+}
+
+.sdp-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Tabs */
+
+.sdp-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--sdp-line);
+}
+
+.sdp-tabs button {
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--sdp-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: default;
+}
+
+.sdp-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--sdp-accent);
+  color: var(--sdp-fg);
+}
+
+/* Visibility chart */
+
+.sdp-chart {
+  margin: 0 0 16px;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--sdp-line);
+  border-radius: var(--sdp-radius);
+}
+
+.sdp-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin-bottom: 10px;
+}
+
+.sdp-chart-value {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sdp-chart-value strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sdp-legend {
+  display: flex;
+  gap: 14px;
+  color: var(--sdp-muted);
+  font-size: 12px;
+}
+
+.sdp-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  margin-right: 6px;
+  border-top: 2px solid var(--sdp-accent);
+  vertical-align: middle;
+}
+
+.sdp-legend .sdp-legend-competitor::before {
+  border-top: 2px dashed var(--sdp-down);
+}
+
+.sdp-segmented {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--sdp-line);
+  border-radius: var(--sdp-radius);
+}
+
+.sdp-segmented button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--sdp-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: default;
+}
+
+.sdp-segmented button[aria-pressed='true'] {
+  background: var(--sdp-soft);
+  color: var(--sdp-fg);
+  font-weight: 600;
+}
+
+.sdp-chart-plot {
+  position: relative;
+  height: 150px;
+  padding-left: 48px;
+}
+
+.sdp-chart-plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sdp-chart-y {
+  position: absolute;
+  left: 0;
+  color: var(--sdp-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sdp-chart-y-top {
+  top: 0;
+}
+
+.sdp-chart-y-bottom {
+  bottom: 0;
+}
+
+.sdp-chart-area {
+  fill: color-mix(in srgb, var(--sdp-accent) 12%, transparent);
+}
+
+.sdp-chart-line {
+  fill: none;
+  stroke: var(--sdp-accent);
+  stroke-width: 2;
+}
+
+.sdp-chart-line-competitor {
+  fill: none;
+  stroke: var(--sdp-down);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.sdp-chart-x {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-left: 48px;
+  color: var(--sdp-muted);
+  font-size: 11px;
+}
+
+/* Competitor in the table */
+
+.sdp-competitor-head {
+  max-width: 140px;
+}
+
+.sdp-competitor-head .sdp-sort {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sdp-cell-button {
+  position: relative;
+}
+
+.sdp-comp {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  color: var(--sdp-fg);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.55;
+}
+
+/* Pages tab */
+
+.sdp-link-button {
+  border: 0;
+  background: none;
+  color: var(--sdp-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: default;
+}
+
+.sdp-page-url {
+  max-width: 420px;
+}
+
+.sdp-page-keywords td {
+  padding: 10px 16px 14px;
+}
+
+.sdp-page-keywords ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sdp-page-keywords li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
   .sdp-title {
     font-size: 22px;
   }
@@ -843,3 +1077,4 @@ th.sdp-day {
     max-height: 100vh;
     border-radius: 0;
   }
+}

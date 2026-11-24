@@ -4,6 +4,9 @@ Show your [SerpDino](https://serpdino.com) Google rankings inside your own site'
 
 - A ready Next.js admin page: keywords, SERP (language-country), search volume and its 12-month trend, position history, estimated clicks, CPC, competition, current position, change, best position, ranking URL and a column for every checked day, coloured by position band.
 - Interactive: search (`-word` excludes), filter tiles (top 3, top 10, 11–50, not ranking, up, down, AI Overview, cited in AI), sorting by any column including days, period select (7–365 days), SERP select, column toggles, CSV export.
+- Columns by day, week or month; a competitor of the project next to your positions (latest, difference, a small number in every cell, "ahead / behind" tiles, a second line on the chart).
+- Visibility chart (estimated clicks or average position over the period) for the keywords on screen; Pages tab (keywords, top 10, easy wins, average and best position, trend, the page's keywords); project header with check schedule, depth, last update and account capacity, and a Refresh link.
+- SerpDino answers are too big for the Next.js data cache (over 2 MB), so the page keeps the rows built from them in memory for `revalidate` seconds: the first open loads, the next ones are instant.
 - Click any position to see the Google results page that check saved: top 30 with movement, the AI Overview, your site highlighted, domains that dropped out; step through checks with ← →.
 - Opens the project of the current site automatically (matched by domain) and has a site switcher for every project in the account.
 - Server-side SerpDino API client with caching, usable outside Next.js.
@@ -82,6 +85,7 @@ Only rank tracking projects are listed (not Google Maps grid or page monitor pro
 | `projectId` | — | Always open this project first. |
 | `hideSwitcher` | `false` | Hide the site switcher. |
 | `days` | `30` | Default days of history; the period select (`?days=`) overrides it. |
+| `searchParams` keys | `days`, `group` (`day`, `week`, `month`), `competitor`, `fresh=1` | Set by the page's own controls. |
 | `serpEndpoint` | `"/api/serpdino/serp"` | Route handler of the results page popup. |
 | `revalidate` | `3600` | Seconds to cache API responses. `0` disables caching. |
 | `ctrCurve` | built-in | CTR per position for the clicks estimate (index 0 = position 1). |
@@ -118,7 +122,7 @@ const rows = await getKeywordPositions(serpdino, projects[0]._id, { startDate: '
 // rows[i]: { keyword, serp, volume, estimatedClicks, position, change, bestPosition, url, positionsByDay, … }
 ```
 
-Client methods: `listProjects`, `getProject`, `getKeywordUpdates`, `getKeywordVolumes`, `getSerpSnapshot` (results page of one check), `getPages`, and `get(path, query)` for any other read endpoint. API errors throw `SerpdinoError` with `status`, `planRequired` and `retryAfter`.
+Client methods: `listProjects`, `getProject`, `getKeywordUpdates`, `getKeywordVolumes`, `getSerpSnapshot` (results page of one check), `getCompetitorPositions`, `getCapacity`, `getPages`, and `get(path, query)` for any other read endpoint. API errors throw `SerpdinoError` with `status`, `planRequired` and `retryAfter`.
 
 The client refuses to run in the browser: never ship the API key to the client.
 
